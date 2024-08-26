@@ -62,9 +62,7 @@ CSE232 covers fundamental and advanced concepts in computer networks, including 
 
 ## Assignments
 
-- **Assignment 1:** Overview and description of the first assignment.
-- **Assignment 2:** Overview and description of the second assignment.
-- **Assignment 3:** Overview and description of the third assignment.
+- **Assignment 1:** Basic command line utilities 
 
 Each assignment is designed to reinforce the concepts learned in the course and includes practical problems and solutions.
 
