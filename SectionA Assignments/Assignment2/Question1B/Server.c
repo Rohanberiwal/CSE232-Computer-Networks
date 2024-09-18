@@ -4,40 +4,54 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <sys/types.h>
+#include <sys/syscall.h> 
+#include <bits/syscall.h>
 
 #define PORT 8081
 #define BUFFER_SIZE 2048
 
+int count_user  = 0 ;
+
 void *handle_client(void *client_socket) {
     int sock = *(int *)client_socket;
     char buffer[BUFFER_SIZE] = {0};
-    const char *response = "Hello server  file " ;
+    const char *response = "Hello from server file";
 
-    // use to read the buffer byptes reciveed we remove 1 because of the null character
+    // PID to print the thread Id that is runnign as this is a code for multi threading 
+
+    pid_t tid = syscall(SYS_gettid);
+    count_user = count_user + 1;
+    printf("------Thread  %d statistics  ------", count_user) ;
+    printf("\n") ;
+    printf("Thread PID(process id on the CPU): %d, Thread ID: %ld\n", getpid(), tid);
+    printf("\n") ;
+    // Read the buffer bytes received (remove 1 because of the null character)
     ssize_t bytes_read = read(sock, buffer, sizeof(buffer) - 1);
     if (bytes_read < 0) {
-        printf("Read operation failed");
+        printf("Read operation failed\n");
         close(sock);
         pthread_exit(NULL);
     }
 
-    // same as the client command remove the bufffer's null character 
+    // Null-terminate the buffer
     buffer[bytes_read] = '\0';
     printf("Message received: %s\n", buffer);
 
-    // here the client send the constant character response ie hello from the client file
+    // Send response to the client
     ssize_t bytes_sent = send(sock, response, strlen(response), 0);
     if (bytes_sent < 0) {
-        printf("Send failed");
+        printf("Send failed\n");
         close(sock);
         pthread_exit(NULL);
     }
 
-    printf("Response sucessfully sent to client \n");
+    printf("Response successfully sent to client\n");
 
     close(sock);
     pthread_exit(NULL);
 }
+
 
 int main() 
 {
