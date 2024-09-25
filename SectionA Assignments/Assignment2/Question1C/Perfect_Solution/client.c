@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
     int num_connections = atoi(argv[1]);
     if (argc != 2) 
     {
-        printf(stderr, "Usage: %s <number_of_connections>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <number_of_connections>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
