@@ -81,16 +81,18 @@ void *client_thread(void *arg)
 
 int main(int argc, char *argv[]) 
 {
-    int num_connections = atoi(argv[1]);
     if (argc != 2) 
     {
-        fprintf(stderr, "Usage: %s <number_of_connections>\n", argv[0]);
+        fprintf(stderr, "error after %s connections are supposed to be specified", argv[0]);
+        printf("\n") ;
         exit(EXIT_FAILURE);
     }
-
+    int num_connections = atoi(argv[1]);
+    // Check if the number of connections is a positive integer
     if (num_connections <= 0) 
     {
-        printf(stderr, "Number of connections must be a positive integer.\n");
+        fprintf(stderr, "Error please enter a positive N value.");
+        printf("\n") ;
         exit(EXIT_FAILURE);
     }
 
