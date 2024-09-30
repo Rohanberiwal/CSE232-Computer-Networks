@@ -7,7 +7,9 @@
 #include <errno.h>
 #include <dirent.h>
 #include <unistd.h>
-
+#include <ctype.h> 
+#include <pthread.h>
+#define MAX_TOP_PROCESSES 2
 long get_clock_ticks_per_second() {
     static long clock_ticks = 0;
     if (clock_ticks == 0) {
@@ -16,275 +18,230 @@ long get_clock_ticks_per_second() {
     return clock_ticks;
 }
 
+typedef struct {
+    char name[256];    // Process name
+    int pid;           // Process ID
+    long user_time;    // User CPU time
+    long kernel_time;  // Kernel CPU time
+    long total_time;   // Total CPU time (user + kernel)
+} ProcessInfo;
+
+
 #define PORT 8081
 #define MAX_EVENTS 100
 #define MAX_CPU_PROCESSES 1024
 #define BUFFER_SIZE 2048
 #define MAX_CONNECTIONS 10
+#define EXTRA_FILE "extra.txt"
 
+int count_user  = 0 ;
 
-typedef struct info_list {
-    int pid;
-    char name[256];
-    double total_cpu_time;; 
-    struct info_list* next;
-} info_list;
-
-info_list* create_node(int pid, const char *name, long total_cpu_time) {
-    info_list *new_node = malloc(sizeof(info_list));
-    if (!new_node) {
-        printf("Malloc failed\n");
-        exit(EXIT_FAILURE);
-    }
-    new_node->pid = pid;
-    strcpy(new_node->name, name);
-    new_node->total_cpu_time = total_cpu_time; // Store total CPU time
-    new_node->next = NULL;
-    return new_node;
-}
-
-void add_node(info_list **head, int pid, const char *name, long total_cpu_time) {
-    info_list *new_node = create_node(pid, name, total_cpu_time);
-    new_node->next = *head; // Insert at the beginning
-    *head = new_node;
-}
-
-
-int scan_process_file(int pid, info_list **process_info) 
-{
-    char path[256];
-    snprintf(path, sizeof(path), "/proc/%d/stat", pid); 
-    FILE *file = fopen(path, "r");
-    if (!file) {
-        printf("Failed to open file for PID %d\n", pid);
-        return -1;
-    }
-
-    int ignored;
-    char name[256];
-    long utime, stime;
-    if (fscanf(file, "%d %s %*c %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %ld %ld",
-           &ignored, name, &utime, &stime) != 4) {
+void clear_extra_file() {
+    FILE *file = fopen(EXTRA_FILE, "w");
+    if (file) 
+    {
         fclose(file);
-        printf("File read failed for PID %d\n", pid);
-        return -1; 
+        //printf("FIle is cleaned ") ;
+    }
+    else 
+    {
+        printf("Failed to clear extra.txt");
+    }
+}
+
+// Function to write process information to a file
+void write_process_info(const char *name, int pid, long user_time, long kernel_time)
+{
+    clear_extra_file();
+    FILE *file = fopen(EXTRA_FILE, "a"); 
+    if (file == NULL) {
+        printf("Could not open extra.txt for writing");
+        return;
     }
 
+    fprintf(file, "Process Name: %s\n", name);
+    fprintf(file, "PID: %d\n", pid);
+    fprintf(file, "User Time: %ld\n", user_time);
+    fprintf(file, "Kernel Time: %ld\n\n", kernel_time);
     fclose(file);
-    double total_cpu_time = (utime + stime) / get_clock_ticks_per_second(); 
-    add_node(process_info, pid, name, total_cpu_time);
+}
+
+// Function to read a process's information from its stat file
+int read_process_stat(const char *pid, char *name, long *utime, long *stime) {
+    char path[256];
+    snprintf(path, sizeof(path), "/proc/%s/stat", pid);
+    
+    FILE *file = fopen(path, "r");
+    if (file) {
+        // Read relevant fields: pid, command name, user time, and kernel time
+        fscanf(file, "%*d %s %*c %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %*d %ld %ld",
+               name, utime, stime);
+        fclose(file);
+        return 1; // Successful read
+    }
     return 0; 
 }
 
 
 
-void sort_process_array(info_list **process_array, int count) {
-    // Simple Bubble Sort for demonstration
-    for (int i = 0; i < count - 1; i++) {
-        for (int j = 0; j < count - i - 1; j++) {
-            if (process_array[j] != NULL && process_array[j + 1] != NULL) {
-                if (process_array[j]->total_cpu_time < process_array[j + 1]->total_cpu_time) {
-                    info_list *temp = process_array[j];
-                    process_array[j] = process_array[j + 1];
-                    process_array[j + 1] = temp;
-                }
-            }
-        }
+
+#include <string.h>
+
+// Function to find the top two CPU-consuming processes
+void process_finder(long total_cpu_time, const char *process_name, int pid,
+                    long user_time, long kernel_time,
+                    long max_cpu_time[2], char top_process_name[2][256], 
+                    int top_pid[2], long top_user_time[2], long top_kernel_time[2]) {
+    
+    // Check if this process is a new top CPU consumer
+    if (total_cpu_time > max_cpu_time[0]) {
+        // Shift the current first to second
+        max_cpu_time[1] = max_cpu_time[0];
+        strcpy(top_process_name[1], top_process_name[0]);
+        top_pid[1] = top_pid[0];
+        top_user_time[1] = top_user_time[0];
+        top_kernel_time[1] = top_kernel_time[0];
+
+        // Update the first max
+        max_cpu_time[0] = total_cpu_time;
+        strcpy(top_process_name[0], process_name);
+        top_pid[0] = pid;
+        top_user_time[0] = user_time;
+        top_kernel_time[0] = kernel_time;
+    } else if (total_cpu_time > max_cpu_time[1]) {
+
+        max_cpu_time[1] = total_cpu_time;
+        strcpy(top_process_name[1], process_name);
+        top_pid[1] = pid;
+        top_user_time[1] = user_time;
+        top_kernel_time[1] = kernel_time;
     }
 }
 
-void print_sorted_processes(info_list **process_array, int count) {
-    printf("Sorted Process Information (by total CPU time):\n");
-    for (int i = 0; i < count; i++) {
-        if (process_array[i] != NULL) {
-            printf("PID: %d, Name: %s, Total CPU Time: %ld\n",
-                   process_array[i]->pid, process_array[i]->name,
-                   process_array[i]->total_cpu_time);
-        }
-    }
-}
-
-void read_process_info(info_list **process_info) {
-    DIR *dir = opendir("/proc");
+void scan_processes() {
+    // Clear the contents of extra.txt before writing new data
+    clear_extra_file();
+    
+    DIR *dir;
     struct dirent *entry;
+    long max_cpu_time[2] = {0, 0}; // Array to hold max CPU times for top two
+    char top_process_name[2][256] = {"", ""}; // Array to hold names of top two processes
+    int top_pid[2] = {-1, -1}; // Array to hold PIDs of top two processes
+    long top_user_time[2] = {0, 0}; // Array to hold user times for top two processes
+    long top_kernel_time[2] = {0, 0}; // Array to hold kernel times for top two processes
 
-    if (dir == NULL) {
-        perror("Failed to open /proc directory");
+    if ((dir = opendir("/proc")) == NULL) {
+        perror("Could not open /proc directory");
         return;
     }
 
     while ((entry = readdir(dir)) != NULL) {
-        int pid = atoi(entry->d_name);
-        if (pid > 0) {  
-            if (scan_process_file(pid, process_info) == -1) {
-                printf("Failed to scan process %d\n", pid);
+        // Only consider directories with numeric names (process IDs)
+        if (isdigit(entry->d_name[0])) {
+            char process_name[256];
+            long user_time, kernel_time;
+
+            if (read_process_stat(entry->d_name, process_name, &user_time, &kernel_time)) {
+                long total_cpu_time = user_time + kernel_time;
+                process_finder(total_cpu_time, process_name, atoi(entry->d_name),
+                                user_time, kernel_time, max_cpu_time,
+                                top_process_name, top_pid,
+                                top_user_time, top_kernel_time);
             }
         }
     }
     closedir(dir);
-}
-
-void handle_error(const char *error_out) 
-{
-    printf(error_out);
-    exit(EXIT_FAILURE);
-}
-
-void cleanup(int server_fd, int epfd) 
-{
-    if (server_fd != -1) 
-    {
-        close(server_fd);
-    }
-    if (epfd != -1) 
-    {
-        close(epfd);
-    }
-}
-
-void print_top_two_processes(info_list **process_array, int process_count) {
-    printf("Top Two Processes by Total CPU Time:\n");
-    for (int i = 0; i < 2 && i < process_count; i++) {
-        if (process_array[i] != NULL) {
-            printf("PID: %d, Name: %s, Total CPU Time: %.6f seconds\n",
-                   process_array[i]->pid, process_array[i]->name,
-                   process_array[i]->total_cpu_time);
-        }
-    }
-}
-
-
-void handle_client(int client_fd) 
-{
-    char buffer[BUFFER_SIZE];
-    ssize_t bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-    if (bytes_read < 0) 
-    {
-        printf("Read command failed\n");
-        close(client_fd);
-        return;
-    }
-    else if (bytes_read == 0) 
-    {
-        printf("Closing connection for file descriptor %d\n", client_fd);
-        close(client_fd);
-        return;
-    } 
-
-    buffer[bytes_read] = '\0';
-    printf("Received message: %s\n", buffer);
-
-    info_list *process_array[MAX_CPU_PROCESSES] = { NULL };
-    read_process_info(process_array);
-
-    int process_count = 0;
-    for (int i = 0; i < MAX_CPU_PROCESSES; i++) {
-        if (process_array[i] != NULL) {
-            process_count++;
+    for (int i = 0; i < 2; i++) {
+        if (top_pid[i] != -1) {
+            write_process_info(top_process_name[i], top_pid[i], top_user_time[i], top_kernel_time[i]);
         }
     }
 
-    sort_process_array(process_array, process_count);
-    print_top_two_processes(process_array, process_count);
+    if (top_pid[0] == -1) {
+        printf("No processes found.\n");
+    }
+}
 
+void *handle_client(void *arg) {
+    int new_socket = *(int *)arg;
+    free(arg); 
+    char buffer[1024] = {0};
+    const char *hello = "Hello from server";
 
-    close(client_fd);
+    ssize_t bytes_read = read(new_socket, buffer, sizeof(buffer));
+    if (bytes_read < 0) {
+        printf("Read error");
+        close(new_socket);
+        return NULL;
+    } else if (bytes_read == 0) {
+        printf("Client disconnected unexpectedly\n");
+        close(new_socket);
+        return NULL;
+    }
+
+    // Process the request
+    scan_processes();
+    ssize_t bytes_sent = send(new_socket, "hello", strlen(hello), 0);
+    if (bytes_sent < 0) {
+        printf("Send error");
+        close(new_socket);
+    }
+
+    printf("Message sent to client: %s\n", hello);
+    close(new_socket);
+    return NULL;
 }
 
 
+int main() {
+    int server_fd;
+    struct sockaddr_in address;
+    int addrlen = sizeof(address);
 
-int main() 
-{
-
-    struct sockaddr_in server_addr;
-    struct epoll_event event, events[MAX_EVENTS];
-    int epfd = -1;
-    int server_fd = socket(AF_INET, SOCK_STREAM, 0) ;
-    //printf("%d",server_fd) ;
-    if (server_fd == -1) 
-    {
-        handle_error("Socket creation failed");
-    }
-    
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(PORT);
-    int bind_output =  bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) ;
-    //printf("%d",bind_output) ;
-    if (bind_output == -1) 
-    {
-        cleanup(server_fd, epfd);
-        handle_error("Bind operation failed cleanup completed");
-    }
-    int listen_output =  listen(server_fd, MAX_CONNECTIONS) ;
-    //  printf("%d",listen_output) ;
-    if (listen_output == -1) 
-    {
-        cleanup(server_fd, epfd);
-        handle_error("Listen command failed  , cleanup completed");
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        printf("Socket failed");
+        exit(EXIT_FAILURE);
     }
 
-    epfd = epoll_create1(0) ;
-    if (epfd == -1) 
-    {
-        cleanup(server_fd, epfd);
-        handle_error("epoll_create1   function call failed");
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(8081); // Changed to 8081
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        printf("Bind failed");
+        exit(EXIT_FAILURE);
     }
 
-    event.events = EPOLLIN; 
-    event.data.fd = server_fd; 
-    int event_status = epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &event) ;
-    //  printf("%d",event_status) ;
-    //  printf("%d",event.data.fd) ;
-    if (event_status == -1) 
-    {
-        cleanup(server_fd, epfd);
-        handle_error("epoll_ctl failed for server_fd");
-    }
-    else 
-    {
-        printf("The socket event is registered wihtout any issue ") ;
-        printf("\n") ;
-        printf("Server listening on port %d\n", PORT);
+    if (listen(server_fd, 3) < 0) {
+        printf("Listen failed");
+        exit(EXIT_FAILURE);
     }
 
-    while (1) 
-    {
-        int num_fds = epoll_wait(epfd, events, MAX_EVENTS, -1);
-        if (num_fds == -1) 
-        {
-            cleanup(server_fd, epfd);
-            handle_error("epoll_wait  fucntion failed , cleanup handled properly");
+    printf("Server listening on port %d\n", PORT);
+
+    while (1) {
+        int *new_socket = malloc(sizeof(int));
+        if (new_socket == NULL) {
+            perror("Failed to allocate memory");
+            exit(EXIT_FAILURE);
         }
 
-        for (int i = 0; i < num_fds; i++) 
-        {
-            if (events[i].data.fd == server_fd) 
-            {
-                int client_fd = accept(server_fd, NULL, NULL);
-                event.events = EPOLLIN; 
-                event.data.fd = client_fd; 
-                if (client_fd == -1)
-                {
-                    printf("Accept function failed");
-                    continue;
-                }
-                if (epoll_ctl(epfd, EPOLL_CTL_ADD, client_fd, &event) == -1) 
-                {
-                    printf("epoll_ctl failed for client_fd");
-                    close(client_fd);
-                    continue;
-                }
+        if ((*new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+            printf("Accept failed");
+            free(new_socket); // Free memory if accept fails
+            continue;
+        }
 
-                printf("Recived Newe on file descriptor number %d\n", client_fd);
-            } 
-            else 
-            {
-                handle_client(events[i].data.fd);
-            }
+        pthread_t thread_id;
+        if (pthread_create(&thread_id, NULL, handle_client, new_socket) != 0) {
+            printf("Thread creation failed");
+            close(*new_socket);
+            free(new_socket);
+        } else {
+            pthread_detach(thread_id); // Detach the thread to clean up resources automatically
         }
     }
 
-    cleanup(server_fd, epfd);
+    close(server_fd);
     return 0;
 }
