@@ -1,5 +1,4 @@
 # Computer Networks (CSE232) Repository
-
 Welcome to the Computer Networks (CSE232) repository! This repository contains resources, notes, assignments, and projects related to the Computer Networks course. The aim is to provide a thorough understanding of the principles and technologies underlying computer networks.
 
 ## Table of Contents
