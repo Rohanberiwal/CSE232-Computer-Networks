@@ -2,111 +2,152 @@ import hashlib
 from itertools import permutations
 
 def preprocess_plaintext(plaintext):
-    """Remove non-alphabet characters and convert to lowercase."""
-    return ''.join(c for c in plaintext.lower() if 'a' <= c <= 'z')
+    lower_text = plaintext.lower()
+    filtered_text = ''.join(c for c in lower_text if 'a' <= c <= 'z')
+    return filtered_text
 
-def calculate_hash(plaintext):
-    """Compute SHA-256 hash of plaintext and return as a hex string."""
-    return hashlib.sha256(plaintext.encode()).hexdigest()
+def computation_hash(plaintext):
+    encoded_text = plaintext.encode()
+    hash_object = hashlib.sha256(encoded_text)
+    return hash_object.hexdigest()
+
 
 def calculate_rows(plaintext, key_length):
-    """Calculate the number of rows required for the transposition grid."""
-    return (len(plaintext) + key_length - 1) // key_length
+    total_chars = len(plaintext)
+    full_rows = total_chars // key_length
+    if total_chars % key_length != 0:
+        full_rows += 1
+    return full_rows
 
-def initialize_grid(num_rows, num_cols):
-    """Initialize an empty grid for transposition."""
-    return [['' for _ in range(num_cols)] for _ in range(num_rows)]
+def makeMatrix(num_rows, num_cols):
+    grid = []
+    for row in range(num_rows):
+        current_row = []
+        for col in range(num_cols):
+            current_row.append('')
+        grid.append(current_row)
+    return grid
 
-def encrypt_transposition(plaintext, key):
-    """Encrypt the plaintext using a transposition cipher with the given key."""
-    plaintext = preprocess_plaintext(plaintext)
-    hash_value = calculate_hash(plaintext)
-    plaintext_with_hash = plaintext + hash_value  # Append hash
-
+def fill_Matrix(plaintext, key):
     num_cols = len(key)
-    num_rows = calculate_rows(plaintext_with_hash, num_cols)
-    grid = initialize_grid(num_rows, num_cols)
+    num_rows = calculate_rows(plaintext, num_cols)
+    grid = makeMatrix(num_rows, num_cols)
 
     index = 0
     for row in range(num_rows):
         for col in range(num_cols):
-            if index < len(plaintext_with_hash):
-                grid[row][col] = plaintext_with_hash[index]
+            if index < len(plaintext):
+                grid[row][col] = plaintext[index]
                 index += 1
+    
+    return grid, num_rows
 
+def encrypt_transposition(plaintext, key):
+    plaintext = preprocess_plaintext(plaintext)
+    hash_value = computation_hash(plaintext)
+    plaintext_with_hash = plaintext + hash_value
+
+    grid, num_rows = fill_Matrix(plaintext_with_hash, key)
+    
     ciphertext = ''
-    for k in sorted(range(len(key)), key=lambda x: key[x] - 1):  
+    sorted_indices = sorted(range(len(key)), key=lambda x: key[x] - 1)
+    
+    for k in sorted_indices:
         for row in range(num_rows):
             if grid[row][k]:
                 ciphertext += grid[row][k]
 
     return ciphertext
 
-def decrypt_transposition(ciphertext, key):
-    """Decrypt the transposition cipher and validate the hash."""
+
+def fill_Matrix_decryption(ciphertext, key):
     num_cols = len(key)
     num_rows = calculate_rows(ciphertext, num_cols)
+    grid = makeMatrix(num_rows, num_cols)
 
-    grid = initialize_grid(num_rows, num_cols)
-
-    # Determine how many characters each column should have
     full_cols = len(ciphertext) % num_cols
-    col_heights = [len(ciphertext) // num_cols + (i < full_cols) for i in range(num_cols)]
-    
+    col_heights = []
+    for i in range(num_cols):
+        if i < full_cols:
+            col_heights.append(len(ciphertext) // num_cols + 1)
+        else:
+            col_heights.append(len(ciphertext) // num_cols)
+
     index = 0
-    for k in sorted(range(len(key)), key=lambda x: key[x] - 1): 
+    sorted_indices = sorted(range(len(key)), key=lambda x: key[x] - 1) 
+    for k in sorted_indices:
         for row in range(col_heights[k]):
             grid[row][k] = ciphertext[index]
             index += 1
+    
+    return grid, num_rows, num_cols
 
+def decrypt_transposition(ciphertext, key):
+    grid, num_rows, num_cols = fill_Matrix_decryption(ciphertext, key)
+    
     plaintext_with_hash = ''
     for row in range(num_rows):
         for col in range(num_cols):
             if grid[row][col]:
                 plaintext_with_hash += grid[row][col]
-
-    # Extract plaintext and hash
+    
     plaintext = plaintext_with_hash[:-64]
     extracted_hash = plaintext_with_hash[-64:]
-
+    
     return plaintext, extracted_hash
 
+def try_decrypt_with_key(ciphertext, key):
+    try:
+        decrypted_plaintext, decrypted_hash = decrypt_transposition(ciphertext, key)
+        if computation_hash(decrypted_plaintext) == decrypted_hash:
+            return decrypted_plaintext, key
+    except:
+        return None, None
+    return None, None
+
 def brute_force_attack(ciphertext, max_key_length=9):
-    """Perform brute-force attack to find the key."""
     for key_length in range(1, max_key_length + 1):
-        print(f"Trying key length: {key_length}")
         for key in permutations(range(1, key_length + 1)):
-            try:
-                decrypted_plaintext, decrypted_hash = decrypt_transposition(ciphertext, key)
-                if calculate_hash(decrypted_plaintext) == decrypted_hash:
-                    print(f"Key found: {key}")
-                    print(f"Decrypted Plaintext: {decrypted_plaintext}")
-                    return key
-            except:
-                continue
+            decrypted_plaintext, found_key = try_decrypt_with_key(ciphertext, key)
+            if found_key:
+                print(f"Key found: {found_key}")
+                print(f"Decrypted Plaintext: {decrypted_plaintext}")
+                return found_key
     print("No valid key found.")
     return None
 
-def run_test_cases():
-    """Run test cases for encryption, decryption, and brute-force attack."""
 
+def main():
     test_cases = [
-        ("helloworld", [1, 3, 4, 5, 2]),
-        ("transpositioncipher", [3, 1, 2, 4]),
-        ("thisisasecretmessage", [1, 2, 3, 4, 5, 6]),
-        ("pythonprogramming", [1, 4, 2, 3, 5, 6 , 9,8,7]),
-        ("cryptographyisfun", [1, 2, 5, 4, 3]),
+    ("helloworld", [1, 3, 4, 5, 2]),
+    ("transpositioncipher", [3, 1, 2, 4]),
+    ("thisisasecretmessage", [1, 2, 3, 4, 5, 6]),
+    ("pythonprogramming", [1, 4, 2, 3, 5, 6, 9, 8, 7]),
+    ("cryptographyisfun", [1, 2, 5, 4, 3]),
+    ("thisisfortestingthus", [3, 1, 4, 2]),
+    ("securecommunication", [2, 3, 1, 5, 4]),
+    ("informationsecurity", [4, 1, 3, 2, 5]),
+    ("confidentialmessage", [5, 3, 1, 4, 2]),
+    ("dataprotection", [1, 3, 2, 4, 5]),
+    ("encryptiondecryption", [2, 4, 3, 1, 5]),
+    ("messageauthentication", [3, 5, 1, 2, 4]),
+    ("blockciphermode", [1, 2, 3, 4]),
+    ("transpositiontechnique", [4, 2, 1, 3]),
+    ("symmetriccryptosystem", [3, 5, 2, 1, 4]),
+    ("publickeyinfrastructure", [2, 1, 4, 3, 5]) , 
+    ("networksecurity", [3, 1, 4, 2])  , 
+    ("thisisfortesting", [3, 1, 4, 2])  ,
+    ("secondtest", [3, 1, 4, 2]) 
     ]
-
 
     for i, (plaintext, key) in enumerate(test_cases):
         plaintext = preprocess_plaintext(plaintext)
-        hash_value = calculate_hash(plaintext)
-        plaintext_with_hash = plaintext + hash_value
-        
+        hash_value = computation_hash(plaintext)
+   
+
         ciphertext = encrypt_transposition(plaintext, key)
         decrypted_plaintext, decrypted_hash = decrypt_transposition(ciphertext, key)
-
+        
         print(f"Test Case {i + 1}:")
         print(f"  Original Plaintext: {plaintext}")
         print(f"  Hash Generated: {hash_value}")
@@ -115,10 +156,9 @@ def run_test_cases():
         print(f"  Decrypted Hash: {decrypted_hash}")
         print(f"  Test Passed: {plaintext == decrypted_plaintext and hash_value == decrypted_hash}")
         print("-" * 50)
-
-        # Brute-force attack
+        
         print("Launching brute-force attack...")
         brute_force_attack(ciphertext)
         print("-" * 50)
 
-run_test_cases()
+main()
